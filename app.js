@@ -815,6 +815,36 @@
     b.onclick = function () { setMode(b.getAttribute('data-mode')); };
   });
 
+  // ---------------------------------------------------------------- 侧栏开关
+  // 把原来的 4 个静态 <h3> 搬进工具栏做开关按钮：图层 / 分组 / 文字栏 / 属性
+  // 默认 #side 隐藏（index.html 已加 class="hidden"），点击才在左侧显示对应栏。
+  var elSide = $('side');
+  var PANEL_OF = { layers: 'layers', groups: 'groups', texts: 'texts', props: 'selPanel' };
+  var S_panel = '';   // 当前激活的面板键；空字符串 = 无
+  function setPanel(p) {
+    // 再次点击同一面板 →收起侧栏
+    if (S_panel === p) p = '';
+    S_panel = p;
+    var tgt = p ? PANEL_OF[p] : '';
+    // 内容区互斥
+    Object.keys(PANEL_OF).forEach(function (k) {
+      var el = $(PANEL_OF[k]);
+      if (el) el.classList.toggle('hidden', PANEL_OF[k] !== tgt);
+    });
+    // 侧栏整体显示/隐藏
+    elSide.classList.toggle('hidden', !tgt);
+    // 工具栏按钮 .active 高亮
+    Array.prototype.forEach.call(document.querySelectorAll('#toolbar button[data-panel]'), function (b) {
+      b.classList.toggle('active', b.getAttribute('data-panel') === p);
+    });
+    // 侧栏尺寸变化后通知渲染器重新计算
+    if (R && typeof R.resize === 'function') R.resize();
+    if (R && typeof R.render === 'function') R.render();
+  }
+  Array.prototype.forEach.call(document.querySelectorAll('#toolbar button[data-panel]'), function (b) {
+    b.onclick = function () { setPanel(b.getAttribute('data-panel')); };
+  });
+
   $('btnFit').onclick = function () {
     R.zoomExtents();
     say('ZOOM EXTENTS：比例 ' + R.scale.toExponential(3));

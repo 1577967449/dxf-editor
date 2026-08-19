@@ -78,18 +78,19 @@
     <button data-mode="m-area">周长面积</button>
     <button data-mode="sel-text">框选文字</button>
     <span class="sep"></span>
+    <button data-panel="layers">图层</button>
+    <button data-panel="groups">分组</button>
+    <button data-panel="texts">文字栏</button>
+    <button data-panel="props">属性</button>
+    <span class="sep"></span>
     <button id="btnClearOverlay">清除标注</button>
     <button id="btnSave">保存(Save)</button>
   </div>
   <div id="main">
-    <div id="side">
-      <h3>图层 (LAYERS)</h3>
+    <div id="side" class="hidden">
       <div id="layers" class="panel"></div>
-      <h3>图层前缀分组</h3>
       <div id="groups" class="panel"></div>
-      <h3>文字 (TEXT/MTEXT)</h3>
       <div id="texts" class="panel"></div>
-      <h3>属性</h3>
       <div id="selPanel">
         <div id="selEmpty">未选中实体。</div>
         <div id="selActions" class="hidden">
