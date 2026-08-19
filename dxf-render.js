@@ -594,6 +594,7 @@
       var ef = list[f];
       if (ef.type === 'HATCH') this._drawHatch(ctx, ef, s, SX, SY);
       else if (ef.type === 'SOLID' || ef.type === 'TRACE' || ef.type === '3DFACE') this._drawSolid(ctx, ef, SX, SY);
+      else if (this._isFillablePoly(ef)) this._fillPoly(ctx, ef, s, SX, SY);
     }
 
     // 第 2 遍：线（按 颜色+线型 分组批量成路径，一次描边）
@@ -602,6 +603,7 @@
       var e2 = list[k];
       var t = e2.type;
       if (t === 'HATCH' || t === 'SOLID' || t === 'TRACE' || t === '3DFACE') continue;
+      if (this._isFillablePoly(e2)) continue;   // 已在第 1 遍填充，避免再画中心线
       if (t === 'TEXT' || t === 'MTEXT' || t === 'ATTRIB') { texts.push(e2); continue; }
       var col = this.colorOf(e2);
       var dash = this.dashOf(e2);
@@ -886,6 +888,82 @@
       if (last.bulge) this._pathBulge(P, last, pts[0], s, SX, SY);
       else P.lineTo(SX(pts[0].x), SY(pts[0].y));
     }
+  };
+
+  // 闭合宽多段线：AutoCAD FILLMODE 下会把内部填充成实体色（如电气设备块）。
+  // 判定条件：闭合（f70&1、首尾重合、或首点在后面某顶点重现形成回路）且宽度 > 0。
+  DxfRenderer.prototype._isWideClosedPoly = function (e) {
+    if (e.type !== 'LWPOLYLINE' && e.type !== 'POLYLINE') return false;
+    var pts = e.vertices && e.vertices.length ? e.vertices : e.points;
+    if (!pts || pts.length < 3) return false;
+    var closed = !!(e.f70 & 1);
+    if (!closed) {
+      var first = pts[0], last = pts[pts.length - 1];
+      closed = first && last && Math.hypot(first.x - last.x, first.y - last.y) < 1e-8;
+      if (!closed && first) {
+        for (var j = 1; j < pts.length; j++) {
+          var pj = pts[j];
+          if (Math.hypot(first.x - pj.x, first.y - pj.y) < 1e-8) { closed = true; break; }
+        }
+      }
+    }
+    if (!closed) return false;
+    if ((e.constantWidth || e.constWidth || 0) > 1e-9) return true;
+    for (var i = 0; i < pts.length; i++) {
+      var p = pts[i];
+      if ((p.startWidth || 0) > 1e-9 || (p.endWidth || 0) > 1e-9 || (p.width || 0) > 1e-9) return true;
+    }
+    return false;
+  };
+
+  // 整图世界包围盒：惰性计算并缓存（所有空间所有实体的并集）
+  DxfRenderer.prototype._getDocBounds = function () {
+    if (this._docBounds) return this._docBounds;
+    var minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity;
+    if (this.spaces) {
+      for (var sp in this.spaces) {
+        var ents = (this.spaces[sp] && this.spaces[sp].entities) || [];
+        for (var i = 0; i < ents.length; i++) {
+          var bb = ents[i]._bb;
+          if (!bb && typeof bbox === 'function') bb = ents[i]._bb = bbox(ents[i]);
+          if (bb) { if (bb.x0 < minx) minx = bb.x0; if (bb.y0 < miny) miny = bb.y0; if (bb.x1 > maxx) maxx = bb.x1; if (bb.y1 > maxy) maxy = bb.y1; }
+        }
+      }
+    }
+    if (!isFinite(minx)) { this._docBounds = { x0: 0, y0: 0, x1: 0, y1: 0, area: 0 }; return this._docBounds; }
+    this._docBounds = { x0: minx, y0: miny, x1: maxx, y1: maxy, area: (maxx - minx) * (maxy - miny) };
+    return this._docBounds;
+  };
+
+  // 是否值得填充：用"该多段线世界包围盒短边 / 整图短边"做门槛——
+  // 设备块等"小局部实体"会远小于 1% 而被填充；PUB_TITLE 这类图框/标题外框
+  // （与整图同量级或达数个百分点）则保持空心描边，匹配商业 CAD 行为。
+  // 注：constWidth 不会被块变换缩放，仍是局部值；因此以纯世界坐标比较最稳。
+  DxfRenderer.prototype._isFillablePoly = function (e) {
+    if (!this._isWideClosedPoly(e)) return false;
+    var bb = e._bb || (e._bb = bbox(e));
+    if (!bb) return false;
+    var dw = bb.x1 - bb.x0, dh = bb.y1 - bb.y0;
+    if (!(dw > 0) || !(dh > 0)) return false;
+    var db = this._getDocBounds();
+    if (!isFinite(db.x0)) return true;                    // 无整图范围信息时退化为不限制
+    var docMin = Math.min(db.x1 - db.x0, db.y1 - db.y0);
+    if (!(docMin > 0)) return true;
+    return Math.min(dw, dh) / docMin < 0.01;              // < 1% 视为可填充的"实心箱体"
+  };
+
+  DxfRenderer.prototype._fillPoly = function (ctx, e, s, SX, SY) {
+    var pts = e.vertices && e.vertices.length ? e.vertices : e.points;
+    if (!pts || pts.length < 3) return;
+    var P = new Path2D();
+    this._pathPoly(P, e, s, SX, SY);
+    // 对 f70=0 但几何闭合的多段线，_pathPoly 不会自动闭合，补充回到起点
+    if (!(e.f70 & 1)) {
+      var first = pts[0];
+      P.lineTo(SX(first.x), SY(first.y));
+    }
+    ctx.fillStyle = this.colorOf(e);
+    ctx.fill(P, 'evenodd');
   };
 
   // 凸度弧：bulge = tan(Δ/4)，精确求圆心半径后走 arc
