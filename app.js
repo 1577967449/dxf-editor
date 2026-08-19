@@ -324,21 +324,15 @@
     var y0 = Math.min(sel.y0, sel.y1), y1 = Math.max(sel.y0, sel.y1);
     var tl = R.screenToWorld(x0, y0), br = R.screenToWorld(x1, y1);   // 屏幕左上/右下 -> 世界
     var wr = { x0: Math.min(tl.x, br.x), y0: Math.min(tl.y, br.y), x1: Math.max(tl.x, br.x), y1: Math.max(tl.y, br.y) };
-    // 周边容差：向四周扩 25% 框选范围（至少 8px），把框边附近的文字也纳入
-    var mx = (wr.x1 - wr.x0) * 0.25 + 8 / R.scale;
-    var my = (wr.y1 - wr.y0) * 0.25 + 8 / R.scale;
-    var wrX = { x0: wr.x0 - mx, y0: wr.y0 - my, x1: wr.x1 + mx, y1: wr.y1 + my };
     var ents = R.activeEntities();
     var res = [];
     for (var i = 0; i < ents.length; i++) {
       var e = ents[i];
       if (e.type !== 'TEXT' && e.type !== 'MTEXT' && e.type !== 'ATTRIB') continue;
       var bb = e._bb; if (!bb) continue;
-      // 严格相交 → 命中；仅与扩展框相交 → 周边（框选范围周边文字）
+      // 仅识别用户实际框选范围内的文字：包围盒与框选矩形相交。
       var hit = !(bb.x1 < wr.x0 || bb.x0 > wr.x1 || bb.y1 < wr.y0 || bb.y0 > wr.y1);
-      if (hit) { res.push({ i: i, e: e, near: false }); continue; }
-      var near = !(bb.x1 < wrX.x0 || bb.x0 > wrX.x1 || bb.y1 < wrX.y0 || bb.y0 > wrX.y1);
-      if (near) res.push({ i: i, e: e, near: true });
+      if (hit) res.push({ i: i, e: e });
     }
     S.boxHilite = res.map(function (r) { return r.i; });
     showTextPick(res, x1, y0);
@@ -351,9 +345,8 @@
     var rows = readingOrderRows(res);
     var all = rows.map(function (row) { return row.map(function (r) { return cleanText(r.e.text); }).join(' '); }).join('\n');
     var count = res.length;
-    var nearCount = res.filter(function (r) { return r.near; }).length;
     var html = '';
-    html += '<div class="hd"><b>框选文字 ' + count + ' 条' + (nearCount ? '（含周边 ' + nearCount + '）' : '') + '</b><span class="sp"></span>'
+    html += '<div class="hd"><b>框选文字 ' + count + ' 条</b><span class="sp"></span>'
       + '<button id="tpCopy">复制全部</button>'
       + '<button id="tpExp">导出</button>'
       + '<button id="tpClose">关闭</button></div>';

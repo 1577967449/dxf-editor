@@ -543,6 +543,9 @@
       if (!g) { g = { clip: e._clip || null, ents: [] }; groupMap[key] = g; groups.push(g); }
       g.ents.push(e);
     }
+    // 先绘制所有几何（填充+线），并收集各裁剪区内的文字，最后统一绘制文字，
+    // 确保文字不会被其他几何遮挡。
+    var textGroups = [];
     for (var gi = 0; gi < groups.length; gi++) {
       var g = groups[gi];
       ctx.save();
@@ -551,7 +554,20 @@
         ctx.rect(SX(g.clip.minx), SY(g.clip.maxy), SX(g.clip.maxx) - SX(g.clip.minx), SY(g.clip.miny) - SY(g.clip.maxy));
         ctx.clip();
       }
-      this._drawEntityList(ctx, g.ents, s, SX, SY);
+      var txts = this._drawEntityList(ctx, g.ents, s, SX, SY, { skipText: true });
+      ctx.restore();
+      if (txts && txts.length) textGroups.push({ clip: g.clip, texts: txts });
+    }
+    // 文字全局置顶绘制（仍尊重各自的 XCLIP 裁剪区）
+    for (var ti = 0; ti < textGroups.length; ti++) {
+      var tg = textGroups[ti];
+      ctx.save();
+      if (tg.clip) {
+        ctx.beginPath();
+        ctx.rect(SX(tg.clip.minx), SY(tg.clip.maxy), SX(tg.clip.maxx) - SX(tg.clip.minx), SY(tg.clip.miny) - SY(tg.clip.maxy));
+        ctx.clip();
+      }
+      for (var tx = 0; tx < tg.texts.length; tx++) this._drawText(ctx, tg.texts[tx], s, SX, SY);
       ctx.restore();
     }
 
@@ -570,7 +586,9 @@
   };
 
   // ---------------------------------------------------------------- 实体列表：填充 + 线 + 文字（按同一空间裁剪矩形分组）
-  DxfRenderer.prototype._drawEntityList = function (ctx, list, s, SX, SY) {
+  // opts.skipText=true 时只绘制几何，不绘制文字，并把文字实体数组返回供调用方统一最后绘制。
+  DxfRenderer.prototype._drawEntityList = function (ctx, list, s, SX, SY, opts) {
+    opts = opts || {};
     // 第 1 遍：填充
     for (var f = 0; f < list.length; f++) {
       var ef = list[f];
@@ -611,7 +629,9 @@
     }
     ctx.setLineDash([]);
 
-    // 第 3 遍：文字
+    if (opts.skipText) return texts;
+
+    // 第 3 遍：文字（与几何同裁剪区；调用方如需全局置顶，应使用 skipText+二次绘制）
     for (var tx = 0; tx < texts.length; tx++) this._drawText(ctx, texts[tx], s, SX, SY);
   };
 
@@ -654,6 +674,8 @@
       if (!g) { g = { clip: e._clip || null, ents: [] }; groupMap[key] = g; groups.push(g); }
       g.ents.push(e);
     }
+    // 几何先绘制，文字统一后绘制，避免被填充/线条遮挡。
+    var textGroups = [];
     for (var gi = 0; gi < groups.length; gi++) {
       var g = groups[gi];
       ctx.save();
@@ -662,7 +684,19 @@
         ctx.rect(SX(g.clip.minx), SY(g.clip.maxy), SX(g.clip.maxx) - SX(g.clip.minx), SY(g.clip.miny) - SY(g.clip.maxy));
         ctx.clip();
       }
-      this._drawEntityList(ctx, g.ents, s, SX, SY);
+      var txts = this._drawEntityList(ctx, g.ents, s, SX, SY, { skipText: true });
+      ctx.restore();
+      if (txts && txts.length) textGroups.push({ clip: g.clip, texts: txts });
+    }
+    for (var ti = 0; ti < textGroups.length; ti++) {
+      var tg = textGroups[ti];
+      ctx.save();
+      if (tg.clip) {
+        ctx.beginPath();
+        ctx.rect(SX(tg.clip.minx), SY(tg.clip.maxy), SX(tg.clip.maxx) - SX(tg.clip.minx), SY(tg.clip.miny) - SY(tg.clip.maxy));
+        ctx.clip();
+      }
+      for (var tx = 0; tx < tg.texts.length; tx++) this._drawText(ctx, tg.texts[tx], s, SX, SY);
       ctx.restore();
     }
   };
