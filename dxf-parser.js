@@ -865,6 +865,9 @@
     var det = matDet(m), sc = matScale(m);
     if (e.points && e.points.length) {
       for (var i = 0; i < e.points.length; i++) {
+        // ELLIPSE points[1] 是长轴端点向量（相对中心），不是绝对坐标，
+        // 应由下方 ELLIPSE 专用分支用线性部分（无平移）变换；跳过避免误加平移。
+        if (e.type === 'ELLIPSE' && i === 1) continue;
         var p = e.points[i]; if (!p) continue;
         var np = matApply(m, p.x, p.y); p.x = np.x; p.y = np.y;
       }
@@ -902,13 +905,23 @@
     if (e.type === 'CIRCLE' || e.type === 'ARC') {
       if (e.r40 != null) e.r40 = Math.abs(e.r40 * sc);
       if (e.type === 'ARC') {
-        var rot = matRot(m) * 180 / Math.PI;
-        if (det >= 0) { e.a50 = (e.a50 || 0) + rot; e.a51 = (e.a51 || 0) + rot; }
-        else {
-          // 镜像：圆弧方向反转，起止角对称交换
-          var s0 = e.a50 || 0, s1 = e.a51 || 0;
-          e.a50 = 180 - s1 + rot; e.a51 = 180 - s0 + rot;
+        if (det >= 0) {
+          var rot = matRot(m) * 180 / Math.PI;
+          e.a50 = (e.a50 || 0) + rot; e.a51 = (e.a51 || 0) + rot;
+        } else {
+          // 镜像：精确变换圆弧端点方向，正确处理 x/y 不同轴镜像。
+          // 旧公式 "180 - angle + rot" 只对 y 轴镜像（sx<0）正确，
+          // 对 x 轴镜像（sy<0）会画到相反方向。
+          var s0 = (e.a50 || 0) * Math.PI / 180;
+          var s1 = (e.a51 || 0) * Math.PI / 180;
+          var t0 = Math.atan2(m.b * Math.cos(s0) + m.d * Math.sin(s0), m.a * Math.cos(s0) + m.c * Math.sin(s0));
+          var t1 = Math.atan2(m.b * Math.cos(s1) + m.d * Math.sin(s1), m.a * Math.cos(s1) + m.c * Math.sin(s1));
+          // 镜像改变圆弧方向，交换起止角
+          e.a50 = t1 * 180 / Math.PI;
+          e.a51 = t0 * 180 / Math.PI;
         }
+        while (e.a50 < 0) e.a50 += 360; while (e.a50 >= 360) e.a50 -= 360;
+        while (e.a51 < 0) e.a51 += 360; while (e.a51 >= 360) e.a51 -= 360;
       }
     }
     if (e.type === 'ELLIPSE') {
@@ -1052,7 +1065,11 @@
     function entityWorldBBox(e) {
       var minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity;
       function add(x, y) { if (x < minx) minx = x; if (x > maxx) maxx = x; if (y < miny) miny = y; if (y > maxy) maxy = y; }
-      if (e.points) for (var i = 0; i < e.points.length; i++) { if (e.points[i]) add(e.points[i].x, e.points[i].y); }
+      if (e.points) for (var i = 0; i < e.points.length; i++) {
+        // ELLIPSE points[1] / MTEXT points[1] 是相对向量，不是绝对坐标，不加入 bbox。
+        if ((e.type === 'ELLIPSE' || e.type === 'MTEXT') && i === 1) continue;
+        if (e.points[i]) add(e.points[i].x, e.points[i].y);
+      }
       if (e.vertices) for (var v = 0; v < e.vertices.length; v++) add(e.vertices[v].x, e.vertices[v].y);
       if (e.ctrl) for (var c = 0; c < e.ctrl.length; c++) add(e.ctrl[c].x, e.ctrl[c].y);
       if (e.fit) for (var f = 0; f < e.fit.length; f++) add(e.fit[f].x, e.fit[f].y);
@@ -1070,7 +1087,7 @@
       else if (e.type === 'ELLIPSE') { var ec = e.points && e.points[0]; var mv = e.points && e.points[1]; var ratio = e.ratio || 1; if (ec && mv) { var rad = Math.hypot(mv.x, mv.y) * Math.max(1, ratio); add(ec.x - rad, ec.y - rad); add(ec.x + rad, ec.y + rad); } }
       if (e.type === 'TEXT' || e.type === 'MTEXT' || e.type === 'ATTRIB' || e.type === 'ATTDEF') { var tp = e.points && e.points[0]; var th = e.r40 || 0; if (tp) { add(tp.x - th, tp.y - th); add(tp.x + th, tp.y + th); } }
       if (minx === Infinity) { var pp = (e.points && e.points[0]) || (e.vertices && e.vertices[0]); if (pp) { minx = maxx = pp.x; miny = maxy = pp.y; } else return null; }
-      return { minx: minx, miny: miny, maxx: maxx, maxy: maxy };
+      return { x0: minx, y0: miny, x1: maxx, y1: maxy };
     }
     function intersectClip(a, b) {
       if (!a) return b; if (!b) return a;
@@ -1161,9 +1178,10 @@
         if (srcBlock) ne._blk = srcBlock;
 
         // 空间裁剪：被裁剪矩形完全排除的实体直接丢弃； surviving 的附加 _clip
+        var bb = entityWorldBBox(ne);
+        if (bb) ne._bb = bb;                         // HATCH 等需要包围盒做图案填充
         if (clip) {
-          var bb = entityWorldBBox(ne);
-          if (!bb || bb.maxx < clip.minx || bb.minx > clip.maxx || bb.maxy < clip.miny || bb.miny > clip.maxy) return;
+          if (!bb || bb.x1 < clip.minx || bb.x0 > clip.maxx || bb.y1 < clip.miny || bb.y0 > clip.maxy) return;
           ne._clip = clip;
         }
 

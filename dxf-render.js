@@ -821,6 +821,9 @@
       case 'ELLIPSE': this._pathEllipse(P, e, s, SX, SY); return;
       case 'SPLINE': this._pathSpline(P, e, s, SX, SY); return;
       case 'POINT': {
+        // Defpoints 层是尺寸/引线定义点层：商业 CAD（AutoCAD/GstarCAD）默认不显示，
+        // 网页端对齐跳过，避免满屏"像素点"噪点（本图约 3128 个此类 POINT）。
+        if (e.layer && /^defpoints$/i.test(e.layer)) return;
         if (!e.points[0]) return;
         var px = SX(e.points[0].x), py = SY(e.points[0].y);
         P.moveTo(px - 1.5, py); P.lineTo(px + 1.5, py); P.moveTo(px, py - 1.5); P.lineTo(px, py + 1.5);
@@ -1406,7 +1409,7 @@
       ctx.strokeStyle = col; ctx.lineWidth = 1;
       ctx.save();
       ctx.clip(P, 'evenodd');
-      var bb = e._bb;
+      var bb = e._bb || this.bboxOf(e);   // 兜底：极少数为 null 时也保证能按边界铺填充，绝不整块不显示
       if (bb) {
         if (e.patLines && e.patLines.length) this._hatchByPattern(ctx, e, bb, s, SX, SY);
         else this._hatchFallback(ctx, e, bb, SX, SY);
@@ -1449,6 +1452,9 @@
 
       // 让 k=0 那条线落在包围盒中心附近：把中心投影到法向，换算成 k
       var bx = pl.bx || 0, by = pl.by || 0;
+      // 包围盒中心相对图案基准点的法向距离；用于把每条线锚定在边界本身而非世界原点，
+      // 否则当 HATCH 远离原点（如坐标在 1.9e6 处）时，所有线会聚到原点附近被裁剪掉而“不显示”。
+      var CNb = (cx - bx) * nx + (cy - by) * ny;
       var k0 = Math.round(((cx - bx) * nx + (cy - by) * ny) / step);
       var kFrom = k0 - Math.ceil(need / 2), kTo = k0 + Math.ceil(need / 2);
 
@@ -1467,9 +1473,12 @@
 
       ctx.beginPath();
       for (var k = kFrom; k <= kTo; k++) {
-        var lx = bx + k * ox, ly = by + k * oy;     // 第 k 条线上的一点
-        ctx.moveTo(SX(lx - dx * halfDiag), SY(ly - dy * halfDiag));
-        ctx.lineTo(SX(lx + dx * halfDiag), SY(ly + dy * halfDiag));
+        // 第 k 条线在法向上的距离 = k*step；把这条线“锚点”放到包围盒中心附近，
+        // 使线段落在边界内（而非世界原点附近）。Q_k = C + (k*step - CNb)*n
+        var qx = cx + (k * step - CNb) * nx;
+        var qy = cy + (k * step - CNb) * ny;
+        ctx.moveTo(SX(qx - dx * halfDiag), SY(qy - dy * halfDiag));
+        ctx.lineTo(SX(qx + dx * halfDiag), SY(qy + dy * halfDiag));
         drawn++;
       }
       ctx.stroke();
