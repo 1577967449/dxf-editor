@@ -18,7 +18,7 @@
 
 `dxf-editor` 把 AutoCAD 的图纸直接搬进浏览器：块（INSERT）全部展开、按图层名前缀分组、支持模型空间 / 图纸空间（布局）切换、文字框选、对象捕捉、改动后写回原文件。它不依赖任何商业 CAD 内核，所有解析与渲染均在前端用 JavaScript 完成。
 
-- **格式支持**：DXF（ASCII / Binary 自动识别），实测覆盖到最新 **AC1032**（AutoCAD 2025 / R2018 格式）。
+- **格式支持**：DXF（**ASCII 与 Binary 均支持**，自动识别），实测覆盖到最新 **AC1032**（AutoCAD 2025 / R2018 格式）。二进制 DXF 由 `dxf-binary.js` 预处理为等价 ASCII 字节流后进入同一解析/渲染管线，**显示与 ASCII 格式完全一致**。
 - **运行方式**：直接用浏览器打开 `index.html` 即可（建议通过本地 HTTP 服务以获得最佳字体加载体验，见下文「快速开始」）。
 - **体积**：核心代码 + 36 个 SHX 字体（约 23 MB），无其他外部依赖。
 
@@ -36,6 +36,7 @@
 | **对象捕捉加固** | 端点 / 中点 / 圆心 + **交点捕捉**（轴线 × 图形真实交点），带性能护栏避免卡顿。 |
 | **改后写回原文件** | 「保存」按原文件名写出（含新增 / 移动 / 删除），使用扁平化 `writeFlat` 策略。 |
 | **字体自适应** | 内置 36 个 SHX 字体 + 复刻的 AutoCAD 字体映射表 `acad-fmp.json`（521 条），对缺失字体按 AutoCAD 规则做替换逼近；真实矢量字形替换系统字体近似的集成见「已知限制」。 |
+| **二进制 DXF 支持** | 直接打开 AutoCAD「另存为 → 文件类型 → Binary DXF」保存的文件；内部转成等价 ASCII 字节流、**复用同一解析/渲染管线**，显示与 ASCII 格式逐像素一致（见第四节第 12 条）。 |
 
 ---
 
@@ -104,6 +105,21 @@ INSERT(360=xdict) → DICTIONARY(ACAD_FILTER) → DICTIONARY(SPATIAL) → AcDbSp
 - 工具栏新增 `<button data-panel="layers|groups|texts|props">`，`app.js` 新增 `setPanel()`（仿 `setMode`）：互斥展开、`.active` 高亮、收起逻辑，切换后 `R.resize()+R.render()` 让画布重新铺满剩余宽度。
 - 属性面板（`#selPanel`）在开关关闭时整体隐藏，选中实体时也只在「属性」开启后可见。
 
+### 6. 二进制 DXF 格式支持（功能新增）— 2026-08-20
+
+- **背景**：AutoCAD「另存为 → 文件类型 → Binary DXF」保存的文件以 22 字节哨兵 `AutoCAD Binary DXF\r\n\x1A\0` 开头，后续组码/值均为二进制编码（非文本）。此前解析器只能处理 ASCII 文本 DXF。
+- **需求**：打开二进制 DXF 后，显示必须与同一张图的 ASCII 版本**逐像素一致**。
+- **设计（保证一致性）**：不另写一套渲染分支，而是把二进制字节流**转换成与对应 ASCII DXF 完全等价的字节流**（`dxf-binary.js` 的 `binaryToText`），再交给既有 `decode()→parse()→flatten()→render()` 管线。因为下游解析、块展开、XCLIP、HATCH、填充、字体、渲染 100% 复用 ASCII 路径，显示必然一致。
+- **关键细节**：
+  - 字符串字段（TEXT/MTEXT/图层名/块名…）**保留原始字节**写入输出流，由 `decode()` 沿用既有编码嗅探（UTF-8 / GBK / ANSI 代码页），与打开同编码 ASCII 文件走完全相同的分支。
+  - 数值字段按 AutoCAD 二进制规范（组码→数据类型映射：双精度 8 字节大端 / 短整 2 字节 / 长整 4 字节 / 布尔 1 字节 / 字节 1 字节 / 二进制块 310-319 转十六进制）解出真实值后文本化。
+  - 大端（big-endian）读取；无 DataView 的老环境有手动 IEEE754 兜底。
+- **集成点**：`dxf-parser.js` 的 `decode()` 字节分支开头检测哨兵并调用 `binaryToText`；`index.html` 在 `dxf-parser.js` 之前加载 `dxf-binary.js`（浏览器全局）；Node 侧 `require('./dxf-binary')`（带 try/catch 容错，未加载也不影响 ASCII）。既支持 `FileReader.readAsArrayBuffer` 也支持 `fs` 字节。
+- **验证**（程序化，Node 自洽测试）：
+  1. 手工构造二进制 buffer（不经过编码器）→ `binaryToText` 还原出的 ASCII 与手工期望**逐字节一致**（哨兵识别 + 各类型解码方向正确）。
+  2. ASCII → 二进制 → 解析 的语义结果与直接解析 ASCII **逐项相同**（实体类型/坐标/图层/颜色/插入参数/多段线顶点），中文 TEXT「墙体厚度200」解码一致。
+  3. 数值精度无损：`123.456789012345`、极小负数 `-1.23e-7` 均精确往返（double 最短表示）。
+
 ---
 
 ## 五、快速开始
@@ -133,6 +149,7 @@ python -m http.server 8080
 | `index.html` | 页面骨架、工具栏、图层组面板、布局标签栏、文字框选弹窗。 |
 | `app.js` | 交互逻辑：打开文件、图层前缀分组、布局切换、文字框选、对象捕捉、保存。 |
 | `dxf-parser.js` | DXF 解析（ASCII/Binary）、编码识别、块展开 `flatten()`、`AcDbSpatialFilter` 提取、几何/OCS→WCS 变换。 |
+| `dxf-binary.js` | AutoCAD **二进制 DXF** 解码：检测 22 字节哨兵、按组码→数据类型映射解出值、转成等价 ASCII 字节流供 `dxf-parser.js` 复用（保证显示与 ASCII 一致）。 |
 | `dxf-render.js` | Canvas 渲染：HATCH、线型、颜色、XCLIP 硬裁、模型/图纸空间、视口裁剪。 |
 | `dxf-writer.js` | 扁平化 `writeFlat` 写回。 |
 | `shx-parser.umd.js` / `shx-parser.cjs` | SHX 真实矢量字形解析（MIT）。 |
@@ -175,6 +192,7 @@ dxf-editor/
 ├── index.html            页面与 UI（工具栏含 图层/分组/文字栏/属性 开关，默认隐藏左侧栏）
 ├── app.js               交互逻辑（含 setPanel 侧栏开关）
 ├── dxf-parser.js        DXF 解析 + 块展开 + XCLIP
+├── dxf-binary.js        二进制 DXF 解码（哨兵识别 + 组码映射 → 等价 ASCII 字节流）
 ├── dxf-render.js        Canvas 渲染 + 模型/图纸空间（含闭合宽多段线填充）
 ├── dxf-writer.js        写回原文件
 ├── shx-parser.umd.js    SHX 真实矢量字形解析（MIT）

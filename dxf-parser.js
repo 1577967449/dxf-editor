@@ -13,6 +13,14 @@
 (function (global) {
   'use strict';
 
+  // 二进制 DXF 支持：优先 require 同目录模块（Node），否则取浏览器全局（需在 index.html 先于本文件加载 dxf-binary.js）
+  var DxfBinary = null;
+  if (typeof module !== 'undefined' && module.exports) {
+    try { DxfBinary = require('./dxf-binary'); } catch (e) { DxfBinary = null; }
+  } else if (global && global.DxfBinary) {
+    DxfBinary = global.DxfBinary;
+  }
+
   // === 完整 AutoCAD ACI 颜色索引 1-255 ===
   var ACI = {
     1:'#FF0000',2:'#FFFF00',3:'#00FF00',4:'#00FFFF',5:'#0000FF',6:'#FF00FF',7:'#FFFFFF',
@@ -1281,6 +1289,10 @@
     if (u8 == null) {                       // 已经是字符串
       var t0 = String(input);
       return { text: unescapeUniEsc(t0), encoding: 'string', acadver: '', codepage: '' };
+    }
+    // 二进制 DXF：先转成等价 ASCII DXF 字节流，再走下面的标准解码（编码嗅探/解析 100% 复用 ASCII 路径）
+    if (DxfBinary && DxfBinary.isBinaryDxf(u8)) {
+      u8 = DxfBinary.binaryToText(u8);
     }
     // 跳过 UTF-8 BOM
     if (u8.length > 2 && u8[0] === 0xEF && u8[1] === 0xBB && u8[2] === 0xBF) {
