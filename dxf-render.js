@@ -472,7 +472,7 @@
     }
     // 文字：粗略按字高与字数估计，保证不被视口剔除误杀
     if ((e.type === 'TEXT' || e.type === 'MTEXT' || e.type === 'ATTRIB') && e.points[0]) {
-      var hh = Math.abs(e.r40 || 2.5);
+      var hh = Math.abs(this._resolveTextHeight(e));
       var len = String(e.text || '').length || 1;
       add(e.points[0].x - hh, e.points[0].y - hh);
       add(e.points[0].x + hh * len, e.points[0].y + hh * 1.5);
@@ -1217,6 +1217,21 @@
     return out;
   }
 
+  // 解析文字高度：DXF 里 group 40 为 0 时表示「使用文字样式固定高度」；
+  // 样式高度也为 0 时回退到 $TEXTSIZE；都没有才用 2.5 兜底。
+  DxfRenderer.prototype._resolveTextHeight = function (e) {
+    var h = e.r40;
+    if (h > 0) return h;
+    var doc = this.doc;
+    var sn = e.style || 'Standard';
+    var style = (doc && doc.styles[sn]) || (doc && (doc.styles['Standard'] || doc.styles['STANDARD']));
+    h = style && style.height;
+    if (h > 0) return h;
+    h = doc && doc.textsize;
+    if (h > 0) return h;
+    return 2.5;
+  };
+
   // 文字总入口：优先真实 SHX 矢量字形（与 AutoCAD 内部同源），失败回退系统字体近似
   DxfRenderer.prototype._drawText = function (ctx, e, s, SX, SY) {
     var st = null;
@@ -1237,7 +1252,7 @@
     var base = e.points[0];
     if ((e.hAlign || e.vAlign) && e.points[1] && (e.points[1].x || e.points[1].y)) base = e.points[1];
     if (!base) return;
-    var h = Math.abs(e.r40 || 2.5) * s;
+    var h = Math.abs(this._resolveTextHeight(e)) * s;
     if (h < 2.2) return;                  // 太小看不清，AutoCAD 也是一团（省时）
     var doc = this.doc;
     var style = (e.style && doc && doc.styles[e.style]) || (doc && (doc.styles['Standard'] || doc.styles['STANDARD']));
@@ -1318,7 +1333,7 @@
     var base = e.points[0];
     if ((e.hAlign || e.vAlign) && e.points[1] && (e.points[1].x || e.points[1].y)) base = e.points[1];
     if (!base) return;
-    var H = Math.abs(e.r40 || 2.5) * s;
+    var H = Math.abs(this._resolveTextHeight(e)) * s;
     if (H < 2.2) return;
     var wf = e.widthFactor || 1;
     var rot = (e.a50 || 0) * D2R;

@@ -869,7 +869,7 @@
     e.extX = 0; e.extY = 0; e.extZ = 1;   // 标记为单位法向，避免重复转换
   }
 
-  function xformEntity(e, m) {
+  function xformEntity(e, m, doc) {
     var det = matDet(m), sc = matScale(m);
     if (e.points && e.points.length) {
       for (var i = 0; i < e.points.length; i++) {
@@ -966,9 +966,15 @@
       }
     }
     if (e.type === 'TEXT' || e.type === 'MTEXT' || e.type === 'ATTRIB' || e.type === 'ATTDEF') {
+      // group 40 为 0 时解析样式固定高度 / $TEXTSIZE；再随块插入比例缩放
+      if (!(e.r40 > 0)) {
+        var stName = e.style || 'Standard';
+        var st = (doc && (doc.styles[stName] || doc.styles['Standard'] || doc.styles['STANDARD']));
+        e.r40 = (st && st.height) || (doc && doc.textsize) || 2.5;
+      }
       if (e.r40 != null) e.r40 = Math.abs(e.r40 * sc);
       var rt = matRot(m) * 180 / Math.PI;
-      e.a50 = (e.a50 || 0) + (det >= 0 ? rt : rt);
+      e.a50 = (e.a50 || 0) + rt;
       if (det < 0) e._mirrored = true;    // MIRRTEXT 默认 0：文字不翻转，仅位置镜像
     }
     if (e.type === 'SPLINE' && e.knots) { /* 结点无需变换 */ }
@@ -1093,7 +1099,16 @@
       }
       if (e.type === 'CIRCLE' || e.type === 'ARC') { var cc = e.points && e.points[0]; var cr = e.r40 || 0; if (cc) { add(cc.x - cr, cc.y - cr); add(cc.x + cr, cc.y + cr); } }
       else if (e.type === 'ELLIPSE') { var ec = e.points && e.points[0]; var mv = e.points && e.points[1]; var ratio = e.ratio || 1; if (ec && mv) { var rad = Math.hypot(mv.x, mv.y) * Math.max(1, ratio); add(ec.x - rad, ec.y - rad); add(ec.x + rad, ec.y + rad); } }
-      if (e.type === 'TEXT' || e.type === 'MTEXT' || e.type === 'ATTRIB' || e.type === 'ATTDEF') { var tp = e.points && e.points[0]; var th = e.r40 || 0; if (tp) { add(tp.x - th, tp.y - th); add(tp.x + th, tp.y + th); } }
+      if (e.type === 'TEXT' || e.type === 'MTEXT' || e.type === 'ATTRIB' || e.type === 'ATTDEF') {
+        var tp = e.points && e.points[0];
+        var th = e.r40 || 0;
+        if (!(th > 0)) {
+          var stName2 = e.style || 'Standard';
+          var st2 = doc && (doc.styles[stName2] || doc.styles['Standard'] || doc.styles['STANDARD']);
+          th = (st2 && st2.height) || (doc && doc.textsize) || 2.5;
+        }
+        if (tp) { add(tp.x - th, tp.y - th); add(tp.x + th, tp.y + th); }
+      }
       if (minx === Infinity) { var pp = (e.points && e.points[0]) || (e.vertices && e.vertices[0]); if (pp) { minx = maxx = pp.x; miny = maxy = pp.y; } else return null; }
       return { x0: minx, y0: miny, x1: maxx, y1: maxy };
     }
@@ -1182,7 +1197,7 @@
         }
         if (ne.type === 'ELLIPSE' && ne.points[1]) { ne._majX = ne.points[1].x; ne._majY = ne.points[1].y; }
         // 单位矩阵时跳过变换，省时
-        if (!(m.a === 1 && m.b === 0 && m.c === 0 && m.d === 1 && m.e === 0 && m.f === 0)) xformEntity(ne, m);
+        if (!(m.a === 1 && m.b === 0 && m.c === 0 && m.d === 1 && m.e === 0 && m.f === 0)) xformEntity(ne, m, doc);
         if (srcBlock) ne._blk = srcBlock;
 
         // 空间裁剪：被裁剪矩形完全排除的实体直接丢弃； surviving 的附加 _clip

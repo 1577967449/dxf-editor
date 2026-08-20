@@ -120,6 +120,19 @@ INSERT(360=xdict) → DICTIONARY(ACAD_FILTER) → DICTIONARY(SPATIAL) → AcDbSp
   2. ASCII → 二进制 → 解析 的语义结果与直接解析 ASCII **逐项相同**（实体类型/坐标/图层/颜色/插入参数/多段线顶点），中文 TEXT「墙体厚度200」解码一致。
   3. 数值精度无损：`123.456789012345`、极小负数 `-1.23e-7` 均精确往返（double 最短表示）。
 
+### 7. 文字显示过小（白点/小横线）— 2026-08-20
+
+**问题**：打开建筑平面图后，文字变成几乎不可辨的白色小点或小横线（见用户反馈截图），与 AutoCAD 打开同一张图时清晰可读的标注明显不一致。
+
+**根因**：DXF 里 TEXT/MTEXT 的 group 40（字高）经常为 `0`，按 DXF 语义这表示「使用文字样式 (STYLE) 的固定高度」；若样式高度也为 `0`，则继续回退到 `$TEXTSIZE`。原渲染器直接按 `Math.abs(e.r40 || 2.5)` 计算，把 `0` 当成「未设置」并硬编码回退到 `2.5` 图形单位。对毫米单位建筑图来说 `2.5mm` 几乎看不见；对嵌套在块参照内的文字，块插入比例 (`sx/sy`) 也没有乘到字高上，导致块内文字与周围几何比例严重失调。
+
+**修复**：
+- `dxf-parser.js` `xformEntity()`：块展开时若文字 `r40 <= 0`，先解析 `STYLE.height` → `$TEXTSIZE` → 兜底 `2.5`，再把结果随块插入平均缩放 `sc` 乘到世界字高。
+- `dxf-render.js` 新增 `_resolveTextHeight(e)`：渲染前统一按 `r40 > 0 ? r40 : STYLE.height : $TEXTSIZE : 2.5` 解析；顶层文字（未经过块变换）同样得到正确字高。
+- `dxf-render.js` 文字包围盒估算与 `_drawTextSys` / `_drawTextShx` 均改用 `_resolveTextHeight()`，避免视口剔除与字号同时出错。
+
+**验证**（程序化，Node 自洽测试）：构造 `TEXT(r40=0)` + `Standard 样式 height=50` + `INSERT(sx=sy=5)`，展开后块内文字字高 = `50×5 = 250` 世界单位；46 文件回归 `ok=46 / err=0`。
+
 ---
 
 ## 五、快速开始
