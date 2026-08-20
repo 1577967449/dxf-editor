@@ -133,6 +133,16 @@ INSERT(360=xdict) → DICTIONARY(ACAD_FILTER) → DICTIONARY(SPATIAL) → AcDbSp
 
 **验证**（程序化，Node 自洽测试）：构造 `TEXT(r40=0)` + `Standard 样式 height=50` + `INSERT(sx=sy=5)`，展开后块内文字字高 = `50×5 = 250` 世界单位；46 文件回归 `ok=46 / err=0`。
 
+### 8. 打开文件「展开失败」（回归，2026-08-20）
+
+**问题**：装上第 7 条的文字修复后，一打开含文字（TEXT/MTEXT/ATTRIB）的 DXF 就弹出「展开失败：…」，整图无法显示。
+
+**根因**：`dxf-render.js` 的 `bbox()` 是个**独立函数**（非方法），在 `R.load()` → `_prepare()` 里以 `bbox(e)` 自由函数方式调用，其内部 `this` 指向全局对象而非渲染器实例。第 7 条把文字包围盒分支改成 `this._resolveTextHeight(e)`，于是 `this._resolveTextHeight` 为 `undefined` → 抛 `TypeError: this._resolveTextHeight is not a function` → 被 `app.js` 的 `R.load()` 捕获并提示「展开失败」。修复前该分支用的是 `e.r40 || 2.5`，不依赖 `this`，故此前一切正常。
+
+**修复**：给 `bbox(e, self)` 增加 `self` 参数，文字分支改为 `self && self._resolveTextHeight ? self._resolveTextHeight(e) : (e.r40 || 2.5)`；并把所有调用点（`_prepare` / `_getDocBounds` / `_isFillablePoly` / `_computeBounds` / `bboxOf`）传入 `this`。文字包围盒估算法在缺少渲染器时仍安全回退到 `e.r40 || 2.5`。
+
+**验证**（程序化，Node 端到端）：镜像 `app.js` 的 `loadBuffer` 流程 `decode→parse→new DxfRenderer(mockCanvas)→R.load(doc)`，对含 6 个/4 个文字实体的 DXF 实测 `R.load` 不再抛错；`bbox` 对单个文字实体也正常。
+
 ---
 
 ## 五、快速开始
