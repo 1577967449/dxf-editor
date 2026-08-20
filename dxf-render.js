@@ -824,11 +824,14 @@
 
   // 把实体几何加到 Path2D（不描边）
   DxfRenderer.prototype._pathEntity = function (P, e, s, SX, SY) {
-    // 发丝线（1px 描边）吸附到像素中心：避免线居中在整数设备像素时横跨两像素各 50%
+    // 发丝线（1px 描边）吸附到【设备像素】中心：避免线居中在整数设备像素时横跨两像素各 50%
     // 而渲染成约 50% 灰、随 zoom/pan 在「灰(看不见)↔纯白(清晰)」间闪烁（白线随 zoom 显隐）。
+    // 关键：画布用 setTransform(dpr,...) 缩放，故必须按 dpr 把坐标对齐到【真实设备像素】中心，
+    // 仅对 CSS 像素做 round+0.5 在 Windows 125%/150% 缩放(dpr=1.25/1.5)下仍会跨设备像素而闪烁。
     var _sx = SX, _sy = SY;
-    SX = function (x) { return Math.round(_sx(x)) + 0.5; };
-    SY = function (y) { return Math.round(_sy(y)) + 0.5; };
+    var dpr = this.dpr || 1;
+    SX = function (x) { return Math.round(_sx(x) * dpr) / dpr + 0.5 / dpr; };
+    SY = function (y) { return Math.round(_sy(y) * dpr) / dpr + 0.5 / dpr; };
     switch (e.type) {
       case 'LINE': {
         var p = e.points; if (!p[0] || !p[1]) return;
@@ -1460,10 +1463,11 @@
 
   // HATCH：把边界环（含 line/arc/ellipse/spline 边 与 polyline 环）求值成路径
   DxfRenderer.prototype._loopPath = function (P, lp, s, SX, SY) {
-    // 同 _pathEntity：填充边界描边也吸附到像素中心，消除 1px 边界线随 zoom 闪烁。
+    // 同 _pathEntity：填充边界描边也按 dpr 吸附到设备像素中心，消除 1px 边界线随 zoom 闪烁。
     var _sx = SX, _sy = SY;
-    SX = function (x) { return Math.round(_sx(x)) + 0.5; };
-    SY = function (y) { return Math.round(_sy(y)) + 0.5; };
+    var dpr = this.dpr || 1;
+    SX = function (x) { return Math.round(_sx(x) * dpr) / dpr + 0.5 / dpr; };
+    SY = function (y) { return Math.round(_sy(y) * dpr) / dpr + 0.5 / dpr; };
     if (lp.polyline && lp.vertices && lp.vertices.length) {
       var v = lp.vertices;
       P.moveTo(SX(v[0].x), SY(v[0].y));

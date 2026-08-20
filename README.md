@@ -143,6 +143,16 @@ INSERT(360=xdict) → DICTIONARY(ACAD_FILTER) → DICTIONARY(SPATIAL) → AcDbSp
 
 **验证**（程序化，Node 端到端）：镜像 `app.js` 的 `loadBuffer` 流程 `decode→parse→new DxfRenderer(mockCanvas)→R.load(doc)`，对含 6 个/4 个文字实体的 DXF 实测 `R.load` 不再抛错；`bbox` 对单个文字实体也正常。
 
+### 9. 线条随 zoom 缩放显隐（白线随 zoom 灰↔白闪烁）— 2026-08-20
+
+**问题**：打开图纸后，1px 细线（尤其白线）随滚轮缩放 / 平移在「几乎看不见的灰」与「清晰的白」之间闪烁，建筑/电气图里整片细线明明存在却"时隐时现"。
+
+**根因**：发丝线吸附原本只做 **CSS 像素**层的 `round(x)+0.5`，而画布用 `setTransform(dpr, …)` 缩放。只有 `dpr=1` 时 CSS 半像素才恰好是设备像素中心；在 Windows 常见 125%/150% 显示缩放（`dpr=1.25/1.5`）下，吸附对齐的是 CSS 半像素，**并未对齐真实设备像素**，1px 线仍跨两个设备像素各约 50% → 抗锯齿成灰色并随 zoom/pan 闪烁。原始修复（commit 6c718c1）的 `round+0.5` 在 dpr≠1 时本就不彻底。
+
+**修复**：把吸附改为按 `dpr` 对齐到**设备像素中心**——`_pathEntity()` 与 `_loopPath()`（HATCH 边界 1px 线）的 `SX/SY` 改为 `Math.round(x*dpr)/dpr + 0.5/dpr`（等价于让 `snappedCss*dpr` 落在半整数）。模型路径与图纸/视口路径都经 `_pathEntity`，一并生效。
+
+**验证**（程序化，Node mock 画布）：构造 `DxfRenderer(dpr∈{1,1.25,1.5,1.75,2,3})`，对一个 LINE 调用 `_pathEntity`，校验所有顶点 `2×(snappedCss×dpr)` 为整数（即落在设备像素中心）：**6/6 PASS**。
+
 ---
 
 ## 五、快速开始
