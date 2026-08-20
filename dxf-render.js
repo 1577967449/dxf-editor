@@ -483,12 +483,27 @@
 
   // ---------------------------------------------------------------- 主绘制
   DxfRenderer.prototype.render = function () {
-    var ctx = this.ctx, c = this.canvas;
+    var c = this.canvas;
     var W = c.clientWidth, H = c.clientHeight;
-    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    var dpr = this.dpr;
+    // 2x 超采样：在 2 倍设备分辨率的离屏 canvas 上绘制，再线性缩放回显示 canvas。
+    // 这样细斜线在 zoom/pan 时的子像素覆盖率变化被多子像素平均，不再在「灰↔白」间跳变。
+    var ss = 2;
+    if (!this._offCanvas) {
+      this._offCanvas = document.createElement('canvas');
+      this._offCtx = this._offCanvas.getContext('2d');
+    }
+    var offW = Math.max(1, Math.floor(W * dpr * ss));
+    var offH = Math.max(1, Math.floor(H * dpr * ss));
+    if (this._offCanvas.width !== offW || this._offCanvas.height !== offH) {
+      this._offCanvas.width = offW;
+      this._offCanvas.height = offH;
+    }
+    var ctx = this._offCtx;
+    ctx.setTransform(dpr * ss, 0, 0, dpr * ss, 0, 0);
     ctx.fillStyle = this.bgColor || '#000';
     ctx.fillRect(0, 0, W, H);
-    var sp = this.active(); if (!sp) return;
+    var sp = this.active(); if (!sp) { this._blitOffscreen(W, H); return; }
 
     var vb = this.viewBounds();
     var s = this.scale, cxw = this.centerX, cyw = this.centerY;
@@ -503,6 +518,7 @@
       this._renderPaper(ctx, s, offX, offY);
       this._drawSnap(ctx, SX, SY);
       if (this.onView) this.onView();
+      this._blitOffscreen(W, H);
       return;
     }
 
@@ -583,6 +599,16 @@
       ctx.restore();
     }
     if (this.onView) this.onView();
+    this._blitOffscreen(W, H);
+  };
+
+  // 把离屏超采样结果缩放回显示 canvas
+  DxfRenderer.prototype._blitOffscreen = function (W, H) {
+    var dpr = this.dpr;
+    var dst = this.ctx;
+    dst.setTransform(dpr, 0, 0, dpr, 0, 0);
+    dst.clearRect(0, 0, W, H);
+    dst.drawImage(this._offCanvas, 0, 0, W, H);
   };
 
   // ---------------------------------------------------------------- 实体列表：填充 + 线 + 文字（按同一空间裁剪矩形分组）
