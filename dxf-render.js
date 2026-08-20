@@ -134,7 +134,7 @@
     var allX = [], allY = [];
     for (var i = 0; i < n; i++) {
       var e = entities[i];
-      var bb = bbox(e);
+      var bb = bbox(e, this);
       e._bb = bb;
       if (bb) {
         if (bb.x0 < minx) minx = bb.x0; if (bb.y0 < miny) miny = bb.y0;
@@ -428,7 +428,7 @@
     return { x0: Math.min.apply(null, xs), y0: Math.min.apply(null, ys), x1: Math.max.apply(null, xs), y1: Math.max.apply(null, ys) };
   }
 
-  function bbox(e) {
+  function bbox(e, self) {
     var x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
     function add(x, y) { if (x < x0) x0 = x; if (y < y0) y0 = y; if (x > x1) x1 = x; if (y > y1) y1 = y; }
     if (e.type === 'CIRCLE') {
@@ -472,7 +472,7 @@
     }
     // 文字：粗略按字高与字数估计，保证不被视口剔除误杀
     if ((e.type === 'TEXT' || e.type === 'MTEXT' || e.type === 'ATTRIB') && e.points[0]) {
-      var hh = Math.abs(this._resolveTextHeight(e));
+      var hh = Math.abs(self && self._resolveTextHeight ? self._resolveTextHeight(e) : (e.r40 || 2.5));
       var len = String(e.text || '').length || 1;
       add(e.points[0].x - hh, e.points[0].y - hh);
       add(e.points[0].x + hh * len, e.points[0].y + hh * 1.5);
@@ -925,7 +925,7 @@
         var ents = (this.spaces[sp] && this.spaces[sp].entities) || [];
         for (var i = 0; i < ents.length; i++) {
           var bb = ents[i]._bb;
-          if (!bb && typeof bbox === 'function') bb = ents[i]._bb = bbox(ents[i]);
+          if (!bb && typeof bbox === 'function') bb = ents[i]._bb = bbox(ents[i], this);
           if (bb) { if (bb.x0 < minx) minx = bb.x0; if (bb.y0 < miny) miny = bb.y0; if (bb.x1 > maxx) maxx = bb.x1; if (bb.y1 > maxy) maxy = bb.y1; }
         }
       }
@@ -941,7 +941,7 @@
   // 注：constWidth 不会被块变换缩放，仍是局部值；因此以纯世界坐标比较最稳。
   DxfRenderer.prototype._isFillablePoly = function (e) {
     if (!this._isWideClosedPoly(e)) return false;
-    var bb = e._bb || (e._bb = bbox(e));
+    var bb = e._bb || (e._bb = bbox(e, this));
     if (!bb) return false;
     var dw = bb.x1 - bb.x0, dh = bb.y1 - bb.y0;
     if (!(dw > 0) || !(dh > 0)) return false;
@@ -1786,12 +1786,12 @@
   DxfRenderer.prototype._computeBounds = function (arr) {
     var minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity;
     for (var i = 0; i < arr.length; i++) {
-      var bb = arr[i]._bb || (arr[i]._bb = bbox(arr[i]));
+      var bb = arr[i]._bb || (arr[i]._bb = bbox(arr[i], this));
       if (bb) { if (bb.x0 < minx) minx = bb.x0; if (bb.y0 < miny) miny = bb.y0; if (bb.x1 > maxx) maxx = bb.x1; if (bb.y1 > maxy) maxy = bb.y1; }
     }
     return { x0: minx, y0: miny, x1: maxx, y1: maxy };
   };
-  DxfRenderer.prototype.bboxOf = function (e) { return bbox(e); };
+  DxfRenderer.prototype.bboxOf = function (e) { return bbox(e, this); };
 
   // 字体解析对外暴露，供自检脚本判断"是否会丢字"
   function resolveFont(font, bigFont) {
